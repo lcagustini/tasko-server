@@ -6,20 +6,26 @@ use std::sync::{Arc, Mutex};
 use std::fs::File;
 
 #[derive(Serialize)]
-struct Item {
+struct List {
     id: usize,
     value: String,
 }
 
 #[derive(Serialize)]
+struct Board {
+    name: String,
+    lists: Vec<List>,
+}
+
+#[derive(Serialize)]
 struct Main {
-    items: Vec<Item>
+    boards: Vec<Board>,
 }
 
 fn main() {
     println!("Now listening on localhost:8000");
 
-    let main = Arc::new(Mutex::new(Main { items: Vec::new() }));
+    let main = Arc::new(Mutex::new(Main { boards: Vec::new() }));
 
     rouille::start_server("localhost:8000", move |request| {
         router!(request,
@@ -35,9 +41,9 @@ fn main() {
 
             (GET) (/new) => {
                 let mut data = main.lock().unwrap();
-                let size = data.items.len();
+                let size = data.boards.len();
 
-                data.items.push(Item { id: size, value: "test".to_owned() });
+                data.boards.push(Board { name: "test".to_owned(), lists: vec!(List { id: 0, value: "testes".to_owned() }) });
                 rouille::Response::text("Success")
             },
 
