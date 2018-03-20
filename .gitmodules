@@ -1,0 +1,3 @@
+[submodule "tasko-web"]
+	path = tasko-web
+	url = https://github.com/lcagustini/tasko-web.git
