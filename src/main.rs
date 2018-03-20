@@ -33,7 +33,7 @@ fn main() {
                 rouille::Response::json(&*data)
             },
 
-            (POST) (/new) => {
+            (GET) (/new) => {
                 let mut data = main.lock().unwrap();
                 let size = data.items.len();
 
