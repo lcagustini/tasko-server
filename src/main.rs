@@ -20,12 +20,13 @@ struct Board {
 #[derive(Serialize)]
 struct Main {
     boards: Vec<Board>,
+    size: usize,
 }
 
 fn main() {
     println!("Now listening on localhost:8000");
 
-    let main = Arc::new(Mutex::new(Main { boards: Vec::new() }));
+    let main = Arc::new(Mutex::new(Main { boards: Vec::new(), size: 0 }));
 
     rouille::start_server("localhost:8000", move |request| {
         router!(request,
@@ -41,9 +42,11 @@ fn main() {
 
             (GET) (/new) => {
                 let mut data = main.lock().unwrap();
-                let size = data.boards.len();
+                let size = data.size;
 
-                data.boards.push(Board { name: "test".to_owned(), lists: vec!(List { id: 0, value: "testes".to_owned() }) });
+                data.boards.push(Board { name: "test".to_owned(), lists: vec!(List { id: size, value: "testes".to_owned() }) });
+                data.size += 1;
+
                 rouille::Response::text("Success")
             },
 
