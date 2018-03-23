@@ -3,36 +3,67 @@ extern crate serde_json;
 #[macro_use] extern crate serde_derive;
 #[macro_use] extern crate rouille;
 
+use std::io::prelude::*;
 use std::sync::{Arc, Mutex};
 use std::fs::File;
 
-#[derive(Serialize)]
+#[derive(Serialize, Deserialize)]
 enum Item {
     Text(String),
 }
 
-#[derive(Serialize)]
+#[derive(Serialize, Deserialize)]
 struct List {
     name: String,
     items: Vec<Item>,
 }
 
-#[derive(Serialize)]
+#[derive(Serialize, Deserialize)]
 struct Board {
     name: String,
     lists: Vec<List>,
 }
 
-#[derive(Serialize)]
+#[derive(Serialize, Deserialize)]
 struct Main {
     boards: Vec<Board>,
     size: usize,
+}
+
+fn save_to_file(data: &mut Main) {
+    let mut file = std::fs::File::create("data.json").unwrap();
+    let serial = serde_json::to_string(data).unwrap();
+
+    let _ = file.write_all(serial.as_bytes());
+}
+
+fn load_from_file() -> Option<Main> {
+    let mut file = match std::fs::File::open("data.json") {
+        Ok(file) => file,
+        Err(_) => return None,
+    };
+
+    let mut s = String::new();
+    let _ = file.read_to_string(&mut s);
+
+    match serde_json::from_str(&s) {
+        Ok(result) => return Some(result),
+        Err(_) => return None,
+    }
 }
 
 fn main() {
     println!("Now listening on localhost:8000");
 
     let main = Arc::new(Mutex::new(Main { boards: Vec::new(), size: 0 }));
+    {
+        let mut data = main.lock().unwrap();
+
+        match load_from_file() {
+            Some(result) => *data = result,
+            None => println!("Error loading from file"),
+        }
+    }
 
     rouille::start_server("localhost:8000", move |request| {
         {
@@ -43,12 +74,12 @@ fn main() {
         }
 
         router!(request,
-                (GET) (/) => {
+                (GET) (/debug) => {
                     let file = File::open("tasko-web/index.html").unwrap();
                     rouille::Response::from_file("text/html", file)
                 },
 
-                (GET) (/interface) => {
+                (GET) (/) => {
                     let file = File::open("tasko-web/interface.html").unwrap();
                     rouille::Response::from_file("text/html", file)
                 },
@@ -56,6 +87,17 @@ fn main() {
                 (GET) (/json) => {
                     let data = main.lock().unwrap();
                     rouille::Response::json(&*data)
+                },
+
+                (GET) (/load) => {
+                    let mut data = main.lock().unwrap();
+
+                    match load_from_file() {
+                        Some(result) => *data = result,
+                        None => println!("Error loading from file"),
+                    }
+
+                    rouille::Response::redirect_303("/")
                 },
 
                 (POST) (/newText) => {
@@ -80,6 +122,7 @@ fn main() {
                         }
                     }
 
+                    save_to_file(&mut*data);
                     rouille::Response::redirect_303("/")
                 },
 
@@ -98,6 +141,7 @@ fn main() {
                         }
                     }
 
+                    save_to_file(&mut*data);
                     rouille::Response::redirect_303("/")
                 },
 
@@ -110,6 +154,7 @@ fn main() {
 
                     data.boards.push(Board { name: input.name, lists: Vec::new() });
 
+                    save_to_file(&mut*data);
                     rouille::Response::redirect_303("/")
                 },
 
