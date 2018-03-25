@@ -92,16 +92,11 @@ fn main() {
                     let mut data = main.lock().unwrap();
 
                     let input = try_or_400!(post_input!(request, {
-                        board: String,
-                        name: String,
+                        board: usize,
+                        list: usize,
                     }));
 
-                    for i in 0..data.boards.len() {
-                        if data.boards[i].name == input.board {
-                            data.boards[i].lists.retain(|ref x| x.name != input.name);
-                            break;
-                        }
-                    }
+                    data.boards[input.board].lists.remove(input.list);
 
                     save_to_file(&mut*data);
                     rouille::Response::empty_204()
@@ -111,10 +106,10 @@ fn main() {
                     let mut data = main.lock().unwrap();
 
                     let input = try_or_400!(post_input!(request, {
-                        name: String,
+                        board: usize,
                     }));
 
-                    data.boards.retain(|ref x| x.name != input.name);
+                    data.boards.remove(input.board);
 
                     save_to_file(&mut*data);
                     rouille::Response::empty_204()
@@ -124,22 +119,12 @@ fn main() {
                     let mut data = main.lock().unwrap();
 
                     let input = try_or_400!(post_input!(request, {
-                        board: String,
-                        list: String,
+                        board: usize,
+                        list: usize,
                         text: String,
                     }));
 
-                    for i in 0..data.boards.len() {
-                        if data.boards[i].name == input.board.to_uppercase() {
-                            for j in 0..data.boards[i].lists.len() {
-                                if data.boards[i].lists[j].name == input.list {
-                                    data.boards[i].lists[j].items.push(Item::Text(input.text));
-                                    break;
-                                }
-                            }
-                            break;
-                        }
-                    }
+                    data.boards[input.board].lists[input.list].items.push(Item::Text(input.text));
 
                     save_to_file(&mut*data);
                     rouille::Response::empty_204()
@@ -149,16 +134,11 @@ fn main() {
                     let mut data = main.lock().unwrap();
 
                     let input = try_or_400!(post_input!(request, {
-                        board: String,
+                        board: usize,
                         name: String,
                     }));
 
-                    for i in 0..data.boards.len() {
-                        if data.boards[i].name == input.board.to_uppercase() {
-                            data.boards[i].lists.push(List { name: input.name, items: Vec::new() });
-                            break;
-                        }
-                    }
+                    data.boards[input.board].lists.push(List { name: input.name, items: Vec::new() });
 
                     save_to_file(&mut*data);
                     rouille::Response::empty_204()
