@@ -27,7 +27,6 @@ struct Board {
 #[derive(Serialize, Deserialize)]
 struct Main {
     boards: Vec<Board>,
-    size: usize,
 }
 
 fn save_to_file(data: &mut Main) {
@@ -55,7 +54,7 @@ fn load_from_file() -> Option<Main> {
 fn main() {
     println!("Now listening on localhost:8000");
 
-    let main = Arc::new(Mutex::new(Main { boards: Vec::new(), size: 0 }));
+    let main = Arc::new(Mutex::new(Main { boards: Vec::new() }));
     {
         let mut data = main.lock().unwrap();
 
@@ -67,7 +66,7 @@ fn main() {
 
     rouille::start_server("localhost:8000", move |request| {
         {
-            let response = rouille::match_assets(&request, ".");
+            let response = rouille::match_assets(&request, "tasko-web");
             if response.is_success() {
                 return response;
             }
@@ -89,18 +88,39 @@ fn main() {
                     rouille::Response::json(&*data)
                 },
 
-                (GET) (/load) => {
+                (DELETE) (/del/list) => {
                     let mut data = main.lock().unwrap();
 
-                    match load_from_file() {
-                        Some(result) => *data = result,
-                        None => println!("Error loading from file"),
+                    let input = try_or_400!(post_input!(request, {
+                        board: String,
+                        name: String,
+                    }));
+
+                    for i in 0..data.boards.len() {
+                        if data.boards[i].name == input.board {
+                            data.boards[i].lists.retain(|ref x| x.name != input.name);
+                            break;
+                        }
                     }
 
-                    rouille::Response::redirect_303("/")
+                    save_to_file(&mut*data);
+                    rouille::Response::empty_204()
                 },
 
-                (POST) (/newText) => {
+                (DELETE) (/del/board) => {
+                    let mut data = main.lock().unwrap();
+
+                    let input = try_or_400!(post_input!(request, {
+                        name: String,
+                    }));
+
+                    data.boards.retain(|ref x| x.name != input.name);
+
+                    save_to_file(&mut*data);
+                    rouille::Response::empty_204()
+                },
+
+                (POST) (/new/text) => {
                     let mut data = main.lock().unwrap();
 
                     let input = try_or_400!(post_input!(request, {
@@ -110,11 +130,10 @@ fn main() {
                     }));
 
                     for i in 0..data.boards.len() {
-                        if data.boards[i].name == input.board {
+                        if data.boards[i].name == input.board.to_uppercase() {
                             for j in 0..data.boards[i].lists.len() {
                                 if data.boards[i].lists[j].name == input.list {
                                     data.boards[i].lists[j].items.push(Item::Text(input.text));
-                                    data.size += 1;
                                     break;
                                 }
                             }
@@ -123,10 +142,10 @@ fn main() {
                     }
 
                     save_to_file(&mut*data);
-                    rouille::Response::redirect_303("/")
+                    rouille::Response::empty_204()
                 },
 
-                (POST) (/newList) => {
+                (POST) (/new/list) => {
                     let mut data = main.lock().unwrap();
 
                     let input = try_or_400!(post_input!(request, {
@@ -135,27 +154,27 @@ fn main() {
                     }));
 
                     for i in 0..data.boards.len() {
-                        if data.boards[i].name == input.board {
+                        if data.boards[i].name == input.board.to_uppercase() {
                             data.boards[i].lists.push(List { name: input.name, items: Vec::new() });
                             break;
                         }
                     }
 
                     save_to_file(&mut*data);
-                    rouille::Response::redirect_303("/")
+                    rouille::Response::empty_204()
                 },
 
-                (POST) (/newBoard) => {
+                (POST) (/new/board) => {
                     let mut data = main.lock().unwrap();
 
                     let input = try_or_400!(post_input!(request, {
                         name: String,
                     }));
 
-                    data.boards.push(Board { name: input.name, lists: Vec::new() });
+                    data.boards.push(Board { name: input.name.to_uppercase(), lists: Vec::new() });
 
                     save_to_file(&mut*data);
-                    rouille::Response::redirect_303("/")
+                    rouille::Response::empty_204()
                 },
 
                 _ => {
