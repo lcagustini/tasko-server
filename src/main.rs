@@ -5,67 +5,97 @@ extern crate serde;
 extern crate serde_json;
 #[macro_use] extern crate serde_derive;
 extern crate rocket;
+extern crate rocket_contrib;
 
-use std::io::prelude::*;
-use std::sync::{Arc, Mutex};
-use std::fs::File;
+use std::sync::{Arc, RwLock};
 use std::path::{Path, PathBuf};
 use rocket::response::NamedFile;
+use std::collections::HashMap;
 
 #[derive(Serialize, Deserialize)]
 enum Item {
-	Text(String),
+    Text(String),
 }
 
 #[derive(Serialize, Deserialize)]
 struct List {
-	name: String,
-	items: Vec<Item>,
+    name: String,
+    items: Vec<Item>,
 }
 
 #[derive(Serialize, Deserialize)]
 struct Board {
-	name: String,
-	lists: Vec<List>,
+    name: String,
+    lists: Vec<List>,
 }
 
-#[derive(Serialize, Deserialize)]
 struct Main {
-	boards: Vec<Board>,
+    boards: Arc<RwLock<Vec<Board>>>,
 }
 
-fn save_to_file(data: &mut Main) {
-	let mut file = std::fs::File::create("data.json").unwrap();
-	let serial = serde_json::to_string(data).unwrap();
+type Boards = Arc<RwLock<HashMap<String, HashMap<String, HashMap<String, Item>>>>>;
 
-	let _ = file.write_all(serial.as_bytes());
+fn main() {
+    rocket::ignite()
+        .mount("/", routes![index, files, json])
+        .mount("/new", routes![new_board])
+        .manage(Main { boards: Arc::new(RwLock::new(Vec::new())) })
+        .manage(Boards::new(RwLock::new(HashMap::new())))
+        .launch();
 }
 
-fn load_from_file() -> Option<Main> {
-	let mut file = match std::fs::File::open("data.json") {
-		Ok(file) => file,
-		Err(_) => return None,
-	};
+//Route "/new"
+#[derive(Deserialize)]
+struct NewBoardJSON {
+    name: String,
+}
+#[post("/board", format="application/json", data="<json>")]
+fn new_board(json: rocket_contrib::Json<NewBoardJSON>, data: rocket::State<Boards>) -> rocket::response::status::NoContent {
+    let mut boards = data.write().unwrap();
 
-	let mut s = String::new();
-	let _ = file.read_to_string(&mut s);
+    boards.insert(json.into_inner().name, HashMap::new());
+    //boards.push(Board { name: json.into_inner().name, lists: Vec::new() });
 
-	match serde_json::from_str(&s) {
-		Ok(result) => return Some(result),
-		Err(_) => return None,
-	}
+    rocket::response::status::NoContent
 }
 
+#[derive(Deserialize)]
+struct NewListJSON {
+    name: String,
+    board: String,
+}
+#[post("/list", format="application/json", data="<json>")]
+fn new_list(json: rocket_contrib::Json<NewListJSON>, data: rocket::State<Boards>) -> rocket::response::status::NoContent {
+    let mut boards = data.write().unwrap();
+    let json = json.into_inner();
+
+    let board = boards.get(&json.board);
+    //boards[json.board].lists.push(List { name: json.name, items: Vec::new() });
+
+    rocket::response::status::NoContent
+}
+
+//Route "/"
 #[get("/")]
 fn index() -> std::io::Result<NamedFile> {
-	NamedFile::open("tasko-web/index.html")
+    NamedFile::open("tasko-web/index.html")
+}
+
+#[get("/json")]
+fn json(data: rocket::State<Boards>) -> rocket::Response {
+    let boards = data.read().unwrap();
+
+    let mut response = rocket::Response::new();
+    response.set_status(rocket::http::Status::Ok);
+    response.set_header(rocket::http::ContentType::JSON);
+
+    let json = serde_json::to_string(&*boards).unwrap();
+    response.set_sized_body(std::io::Cursor::new(json));
+
+    response
 }
 
 #[get("/<file..>")]
 fn files(file: PathBuf) -> Option<NamedFile> {
-	NamedFile::open(Path::new("tasko-web/").join(file)).ok()
-}
-
-fn main() {
-	rocket::ignite().mount("/", routes![index, files]).launch();
+    NamedFile::open(Path::new("tasko-web/").join(file)).ok()
 }
