@@ -11,67 +11,92 @@ use std::sync::{Arc, RwLock};
 use std::path::{Path, PathBuf};
 use rocket::response::NamedFile;
 use std::collections::HashMap;
+use std::io::prelude::*;
 
+#[derive(Deserialize)]
+struct TextJSON {
+    name: String,
+    list: String,
+    board: String,
+}
+#[derive(Deserialize)]
+struct ListJSON {
+    name: String,
+    board: String,
+}
+#[derive(Deserialize)]
+struct BoardJSON {
+    name: String,
+}
+
+type UnwrappedBoards = HashMap<String, HashMap<String, HashMap<String, Item>>>;
+type Boards = Arc<RwLock<UnwrappedBoards>>;
 #[derive(Serialize, Deserialize)]
 enum Item {
     Text(String),
 }
 
-#[derive(Serialize, Deserialize)]
-struct List {
-    name: String,
-    items: Vec<Item>,
+fn save_to_file(data: &UnwrappedBoards) {
+    let mut file = std::fs::File::create("data.json").unwrap();
+    let serial = serde_json::to_string(data).unwrap();
+
+    let _ = file.write_all(serial.as_bytes());
 }
 
-#[derive(Serialize, Deserialize)]
-struct Board {
-    name: String,
-    lists: Vec<List>,
-}
+fn load_from_file() -> Boards {
+    let mut file = match std::fs::File::open("data.json") {
+        Ok(file) => file,
+        Err(_) => return Arc::new(RwLock::new(UnwrappedBoards::new())),
+    };
 
-struct Main {
-    boards: Arc<RwLock<Vec<Board>>>,
-}
+    let mut s = String::new();
+    let _ = file.read_to_string(&mut s);
 
-type Boards = Arc<RwLock<HashMap<String, HashMap<String, HashMap<String, Item>>>>>;
+    match serde_json::from_str(&s) {
+        Ok(result) => return Arc::new(RwLock::new(result)),
+        Err(_) => return Arc::new(RwLock::new(UnwrappedBoards::new())),
+    }
+}
 
 fn main() {
     rocket::ignite()
         .mount("/", routes![index, files, json])
-        .mount("/new", routes![new_board])
-        .manage(Main { boards: Arc::new(RwLock::new(Vec::new())) })
-        .manage(Boards::new(RwLock::new(HashMap::new())))
+        .mount("/new", routes![new_board, new_list, new_text])
+        .mount("/del", routes![del_board, del_list, del_text])
+        .manage(load_from_file())
         .launch();
 }
 
 //Route "/new"
-#[derive(Deserialize)]
-struct NewBoardJSON {
-    name: String,
-}
 #[post("/board", format="application/json", data="<json>")]
-fn new_board(json: rocket_contrib::Json<NewBoardJSON>, data: rocket::State<Boards>) -> rocket::response::status::NoContent {
+fn new_board(json: rocket_contrib::Json<BoardJSON>, data: rocket::State<Boards>) -> rocket::response::status::NoContent {
     let mut boards = data.write().unwrap();
 
     boards.insert(json.into_inner().name, HashMap::new());
-    //boards.push(Board { name: json.into_inner().name, lists: Vec::new() });
 
+    save_to_file(&*boards);
     rocket::response::status::NoContent
 }
 
-#[derive(Deserialize)]
-struct NewListJSON {
-    name: String,
-    board: String,
-}
 #[post("/list", format="application/json", data="<json>")]
-fn new_list(json: rocket_contrib::Json<NewListJSON>, data: rocket::State<Boards>) -> rocket::response::status::NoContent {
+fn new_list(json: rocket_contrib::Json<ListJSON>, data: rocket::State<Boards>) -> rocket::response::status::NoContent {
     let mut boards = data.write().unwrap();
     let json = json.into_inner();
 
-    let board = boards.get(&json.board);
-    //boards[json.board].lists.push(List { name: json.name, items: Vec::new() });
+    boards.get_mut(&json.board).unwrap().insert(json.name, HashMap::new());
 
+    save_to_file(&*boards);
+    rocket::response::status::NoContent
+}
+
+#[post("/text", format="application/json", data="<json>")]
+fn new_text(json: rocket_contrib::Json<TextJSON>, data: rocket::State<Boards>) -> rocket::response::status::NoContent {
+    let mut boards = data.write().unwrap();
+    let json = json.into_inner();
+
+    boards.get_mut(&json.board).unwrap().get_mut(&json.list).unwrap().insert(json.name.clone(), Item::Text(json.name));
+
+    save_to_file(&*boards);
     rocket::response::status::NoContent
 }
 
@@ -98,4 +123,37 @@ fn json(data: rocket::State<Boards>) -> rocket::Response {
 #[get("/<file..>")]
 fn files(file: PathBuf) -> Option<NamedFile> {
     NamedFile::open(Path::new("tasko-web/").join(file)).ok()
+}
+
+//Route "/del"
+#[delete("/board", format="application/json", data="<json>")]
+fn del_board(json: rocket_contrib::Json<BoardJSON>, data: rocket::State<Boards>) -> rocket::response::status::NoContent {
+    let mut boards = data.write().unwrap();
+
+    boards.remove(&json.into_inner().name);
+
+    save_to_file(&*boards);
+    rocket::response::status::NoContent
+}
+
+#[delete("/list", format="application/json", data="<json>")]
+fn del_list(json: rocket_contrib::Json<ListJSON>, data: rocket::State<Boards>) -> rocket::response::status::NoContent {
+    let mut boards = data.write().unwrap();
+    let json = json.into_inner();
+
+    boards.get_mut(&json.board).unwrap().remove(&json.name);
+
+    save_to_file(&*boards);
+    rocket::response::status::NoContent
+}
+
+#[delete("/text", format="application/json", data="<json>")]
+fn del_text(json: rocket_contrib::Json<TextJSON>, data: rocket::State<Boards>) -> rocket::response::status::NoContent {
+    let mut boards = data.write().unwrap();
+    let json = json.into_inner();
+
+    boards.get_mut(&json.board).unwrap().get_mut(&json.list).unwrap().remove(&json.name);
+
+    save_to_file(&*boards);
+    rocket::response::status::NoContent
 }
