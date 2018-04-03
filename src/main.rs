@@ -4,18 +4,25 @@
 extern crate serde;
 extern crate serde_json;
 #[macro_use] extern crate serde_derive;
+
 extern crate rocket;
 extern crate rocket_contrib;
+
+extern crate chrono;
 
 use std::sync::{Arc, RwLock};
 use std::path::{Path, PathBuf};
 use rocket::response::NamedFile;
+use rocket::response::status::*;
 use std::collections::HashMap;
 use std::io::prelude::*;
 
 #[derive(Deserialize)]
-struct TextJSON {
+struct ItemJSON {
     name: String,
+    due_time: Option<chrono::DateTime<chrono::Utc>>,
+    note: Option<String>,
+
     list: String,
     board: String,
 }
@@ -32,15 +39,23 @@ struct BoardJSON {
 type UnwrappedBoards = HashMap<String, HashMap<String, HashMap<String, Item>>>;
 type Boards = Arc<RwLock<UnwrappedBoards>>;
 #[derive(Serialize, Deserialize)]
-enum Item {
-    Text(String),
+struct Item {
+    name: String,
+    due_time: Option<chrono::DateTime<chrono::Utc>>,
+    note: Option<String>,
+    checked: bool,
 }
 
 fn save_to_file(data: &UnwrappedBoards) {
-    let mut file = std::fs::File::create("data.json").unwrap();
-    let serial = serde_json::to_string(data).unwrap();
+    let file = std::fs::File::create("data.json");
+    let serial = serde_json::to_string(data);
 
-    let _ = file.write_all(serial.as_bytes());
+    if file.is_ok() && serial.is_ok() {
+        let _ = file.unwrap().write_all(serial.unwrap().as_bytes());
+    }
+    else {
+        println!("Failed to save changes to file");
+    }
 }
 
 fn load_from_file() -> Boards {
@@ -61,43 +76,64 @@ fn load_from_file() -> Boards {
 fn main() {
     rocket::ignite()
         .mount("/", routes![index, files, json])
-        .mount("/new", routes![new_board, new_list, new_text])
-        .mount("/del", routes![del_board, del_list, del_text])
+        .mount("/new", routes![new_board, new_list, new_item])
+        .mount("/del", routes![del_board, del_list, del_item])
         .manage(load_from_file())
         .launch();
 }
 
 //Route "/new"
 #[post("/board", format="application/json", data="<json>")]
-fn new_board(json: rocket_contrib::Json<BoardJSON>, data: rocket::State<Boards>) -> rocket::response::status::NoContent {
+fn new_board(json: rocket_contrib::Json<BoardJSON>, data: rocket::State<Boards>) -> NoContent {
     let mut boards = data.write().unwrap();
 
     boards.insert(json.into_inner().name, HashMap::new());
 
     save_to_file(&*boards);
-    rocket::response::status::NoContent
+    NoContent
 }
 
 #[post("/list", format="application/json", data="<json>")]
-fn new_list(json: rocket_contrib::Json<ListJSON>, data: rocket::State<Boards>) -> rocket::response::status::NoContent {
+fn new_list(json: rocket_contrib::Json<ListJSON>, data: rocket::State<Boards>) -> Result<NoContent, BadRequest<()>> {
     let mut boards = data.write().unwrap();
     let json = json.into_inner();
 
-    boards.get_mut(&json.board).unwrap().insert(json.name, HashMap::new());
+    {
+        let board = match boards.get_mut(&json.board) {
+            None => return Err(BadRequest(None)),
+            Some(b) => b,
+        };
+
+        board.insert(json.name, HashMap::new());
+    }
 
     save_to_file(&*boards);
-    rocket::response::status::NoContent
+    Ok(NoContent)
 }
 
-#[post("/text", format="application/json", data="<json>")]
-fn new_text(json: rocket_contrib::Json<TextJSON>, data: rocket::State<Boards>) -> rocket::response::status::NoContent {
+#[post("/item", format="application/json", data="<json>")]
+fn new_item(json: rocket_contrib::Json<ItemJSON>, data: rocket::State<Boards>) -> Result<NoContent, BadRequest<()>> {
     let mut boards = data.write().unwrap();
     let json = json.into_inner();
 
-    boards.get_mut(&json.board).unwrap().get_mut(&json.list).unwrap().insert(json.name.clone(), Item::Text(json.name));
+    {
+        let board = match boards.get_mut(&json.board) {
+            None => return Err(BadRequest(None)),
+            Some(b) => b,
+        };
+
+        let list = match board.get_mut(&json.list) {
+            None => return Err(BadRequest(None)),
+            Some(l) => l,
+        };
+
+        list.insert(json.name.clone(),
+            Item{ name: json.name, due_time: json.due_time, note: json.note, checked: false }
+        );
+    }
 
     save_to_file(&*boards);
-    rocket::response::status::NoContent
+    Ok(NoContent)
 }
 
 //Route "/"
@@ -127,33 +163,52 @@ fn files(file: PathBuf) -> Option<NamedFile> {
 
 //Route "/del"
 #[delete("/board", format="application/json", data="<json>")]
-fn del_board(json: rocket_contrib::Json<BoardJSON>, data: rocket::State<Boards>) -> rocket::response::status::NoContent {
+fn del_board(json: rocket_contrib::Json<BoardJSON>, data: rocket::State<Boards>) -> NoContent {
     let mut boards = data.write().unwrap();
 
     boards.remove(&json.into_inner().name);
 
     save_to_file(&*boards);
-    rocket::response::status::NoContent
+    NoContent
 }
 
 #[delete("/list", format="application/json", data="<json>")]
-fn del_list(json: rocket_contrib::Json<ListJSON>, data: rocket::State<Boards>) -> rocket::response::status::NoContent {
+fn del_list(json: rocket_contrib::Json<ListJSON>, data: rocket::State<Boards>) -> Result<NoContent, BadRequest<()>> {
     let mut boards = data.write().unwrap();
     let json = json.into_inner();
 
-    boards.get_mut(&json.board).unwrap().remove(&json.name);
+    {
+        let board = match boards.get_mut(&json.board) {
+            None => return Err(BadRequest(None)),
+            Some(b) => b,
+        };
+
+        board.remove(&json.name);
+    }
 
     save_to_file(&*boards);
-    rocket::response::status::NoContent
+    Ok(NoContent)
 }
 
-#[delete("/text", format="application/json", data="<json>")]
-fn del_text(json: rocket_contrib::Json<TextJSON>, data: rocket::State<Boards>) -> rocket::response::status::NoContent {
+#[delete("/item", format="application/json", data="<json>")]
+fn del_item(json: rocket_contrib::Json<ItemJSON>, data: rocket::State<Boards>) -> Result<NoContent, BadRequest<()>> {
     let mut boards = data.write().unwrap();
     let json = json.into_inner();
 
-    boards.get_mut(&json.board).unwrap().get_mut(&json.list).unwrap().remove(&json.name);
+    {
+        let board = match boards.get_mut(&json.board) {
+            None => return Err(BadRequest(None)),
+            Some(b) => b,
+        };
+
+        let list = match board.get_mut(&json.list) {
+            None => return Err(BadRequest(None)),
+            Some(l) => l,
+        };
+
+        list.remove(&json.name);
+    }
 
     save_to_file(&*boards);
-    rocket::response::status::NoContent
+    Ok(NoContent)
 }
