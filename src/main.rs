@@ -78,6 +78,7 @@ fn main() {
         .mount("/", routes![index, files, json])
         .mount("/new", routes![new_board, new_list, new_item])
         .mount("/del", routes![del_board, del_list, del_item])
+        .mount("/upd", routes![upd_check])
         .manage(load_from_file())
         .launch();
 }
@@ -207,6 +208,35 @@ fn del_item(json: rocket_contrib::Json<ItemJSON>, data: rocket::State<Boards>) -
         };
 
         list.remove(&json.name);
+    }
+
+    save_to_file(&*boards);
+    Ok(NoContent)
+}
+
+//Route "/upd"
+#[patch("/check", format="application/json", data="<json>")]
+fn upd_check(json: rocket_contrib::Json<ItemJSON>, data: rocket::State<Boards>) -> Result<NoContent, BadRequest<()>> {
+    let mut boards = data.write().unwrap();
+    let json = json.into_inner();
+
+    {
+        let board = match boards.get_mut(&json.board) {
+            None => return Err(BadRequest(None)),
+            Some(b) => b,
+        };
+
+        let list = match board.get_mut(&json.list) {
+            None => return Err(BadRequest(None)),
+            Some(l) => l,
+        };
+
+        let item = match list.get_mut(&json.name) {
+            None => return Err(BadRequest(None)),
+            Some(i) => i,
+        };
+
+        item.checked = !item.checked;
     }
 
     save_to_file(&*boards);
