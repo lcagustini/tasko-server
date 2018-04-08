@@ -22,6 +22,7 @@ struct ItemJSON {
     name: String,
     due_time: Option<chrono::DateTime<chrono::Utc>>,
     note: Option<String>,
+    labels: Option<Vec<Label>>,
 
     list: String,
     board: String,
@@ -43,7 +44,13 @@ struct Item {
     name: String,
     due_time: Option<chrono::DateTime<chrono::Utc>>,
     note: Option<String>,
+    labels: Vec<Label>,
     checked: bool,
+}
+#[derive(Serialize, Deserialize)]
+struct Label {
+    color: usize,
+    name: String,
 }
 
 fn save_to_file(data: &UnwrappedBoards) {
@@ -128,8 +135,13 @@ fn new_item(json: rocket_contrib::Json<ItemJSON>, data: rocket::State<Boards>) -
             Some(l) => l,
         };
 
+        let labels = match json.labels {
+            None => Vec::new(),
+            Some(label) => label,
+        };
+
         list.insert(json.name.clone(),
-            Item{ name: json.name, due_time: json.due_time, note: json.note, checked: false }
+            Item{ name: json.name, due_time: json.due_time, note: json.note, labels: labels, checked: false }
         );
     }
 
